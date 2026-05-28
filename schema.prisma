@@ -1,0 +1,88 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+  runtime  = "deno"
+}
+
+/// Generates an ERD diagram in Mermaid format
+generator erd {
+  provider = "prisma-erd-generator"
+  output   = "./erd.md"
+  format   = "mermaid"
+}
+
+/// A language supported by the platform, identified by multiple standard codes
+model Language {
+  id            Int    @id @default(autoincrement())
+  bcp47Code     String @unique /// e.g. "de", "en-US", "zh-Hans-CN"
+  posixCode     String @unique /// e.g. "de_AT", "fr_FR"
+  iso6393Code   String @unique /// e.g. "deu", "eng", "cmn"
+  directoryName String @unique /// e.g. "values-de", "values-zh-rCN"
+  englishName   String @unique /// e.g. "German", "Chinese"
+  whisperCode   String? @unique /// optional Whisper speech recognition code, e.g. "german"
+
+  proficiencies LanguageProficiency[]
+  votes         Vote[]
+}
+
+/// An English source text (master string) that needs to be translated
+model MasterString {
+  id   Int    @id @default(autoincrement())
+  text String @unique /// the English original, e.g. "Are you sure you want to delete this preset?"
+
+  votes Vote[]
+}
+
+/// A large language model that can submit translations
+model Llm {
+  id   Int    @id @default(autoincrement())
+  name String @unique /// e.g. "gpt-4", "claude-4", "gemini-3.1-pro"
+
+  proficiencies LanguageProficiency[]
+  votes         Vote[]
+}
+
+/// A model's self-assessed proficiency (1–10) for a specific language.
+/// Each model may rate each language at most once.
+model LanguageProficiency {
+  id         Int @id @default(autoincrement())
+  level      Int /// 1 = very poor, 10 = perfect
+  llmId      Int
+  languageId Int
+
+  llm      Llm      @relation(fields: [llmId], references: [id], onDelete: Cascade)
+  language Language @relation(fields: [languageId], references: [id], onDelete: Cascade)
+
+  @@unique([llmId, languageId])
+
+  /// Speeds up lookups of a specific LLM's self-assessment for a specific language
+  @@index([llmId, languageId])
+}
+
+/// A translation vote: one LLM's submitted translation for one source text
+/// into one target language at a specific point in time.
+model Vote {
+  id             Int      @id @default(autoincrement())
+  translatedText String   /// the proposed translation
+  createdAt      DateTime @default(now()) /// timestamp of submission
+  llmId          Int
+  masterStringId Int
+  languageId     Int
+
+  llm          Llm          @relation(fields: [llmId], references: [id], onDelete: Cascade)
+  masterString MasterString @relation(fields: [masterStringId], references: [id], onDelete: Cascade)
+  language     Language     @relation(fields: [languageId], references: [id], onDelete: Cascade)
+
+  /// A vote is uniquely identified by (model, source text, target language, translation text)
+  @@unique([llmId, masterStringId, languageId, translatedText])
+
+  /// Speeds up queries filtering all votes for a specific target language
+  @@index([languageId])
+
+  /// Speeds up queries filtering all votes submitted by a specific LLM
+  @@index([llmId])
+}
